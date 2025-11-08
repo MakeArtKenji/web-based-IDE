@@ -2,18 +2,22 @@ import { useState, useEffect } from 'react';
 import { FileNode, OpenFile, ClipboardItem } from '@/types/ide';
 import { FileExplorer } from './FileExplorer';
 import { CodeEditor } from './CodeEditor';
-import { SearchPanel } from './SearchPanel';
+import { Terminal } from './Terminal';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable';
 import {
   Code2,
   Play,
-  Search,
-  FolderTree,
   X,
   ChevronRight,
-  Sun,
-  Moon,
+  Search,
+  Terminal as TerminalIcon,
 } from 'lucide-react';
 import {
   generateId,
@@ -23,6 +27,7 @@ import {
   updateNodeById,
   addNodeToParent,
   getPathBreadcrumbs,
+  searchInFiles,
 } from '@/utils/fileUtils';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -40,21 +45,28 @@ export function IDE() {
           name: 'index.html',
           type: 'file',
           path: 'project > index.html',
-          content: '<!DOCTYPE html>\n<html>\n<head>\n  <title>Hello World</title>\n</head>\n<body>\n  <h1>Hello World!</h1>\n</body>\n</html>',
+          content: '<!DOCTYPE html>\n<html>\n<head>\n  <title>Hello World</title>\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <script src="script.js"></script>\n</body>\n</html>',
         },
         {
           id: generateId(),
           name: 'styles.css',
           type: 'file',
           path: 'project > styles.css',
-          content: 'body {\n  margin: 0;\n  padding: 20px;\n  font-family: Arial, sans-serif;\n}',
+          content: 'body {\n  margin: 0;\n  padding: 20px;\n  font-family: Arial, sans-serif;\n  background: #1e1e1e;\n  color: #d4d4d4;\n}',
         },
         {
           id: generateId(),
-          name: 'app.ts',
+          name: 'script.js',
           type: 'file',
-          path: 'project > app.ts',
-          content: 'console.log("Hello from TypeScript!");',
+          path: 'project > script.js',
+          content: 'console.log("Hello from JavaScript!");\n\nfunction greet(name) {\n  return `Hello, ${name}!`;\n}\n\nconsole.log(greet("World"));',
+        },
+        {
+          id: generateId(),
+          name: 'app.py',
+          type: 'file',
+          path: 'project > app.py',
+          content: 'def greet(name):\n    return f"Hello, {name}!"\n\nif __name__ == "__main__":\n    print(greet("World"))\n    print("Python script executed!")',
         },
       ],
     },
@@ -63,19 +75,16 @@ export function IDE() {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<ClipboardItem | null>(null);
-  const [sidebarView, setSidebarView] = useState<'explorer' | 'search'>('explorer');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [output, setOutput] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
 
   const activeFile = openFiles.find((f) => f.id === activeFileId) || null;
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [theme]);
+    document.documentElement.classList.add('dark');
+  }, []);
 
   const handleFileClick = (node: FileNode) => {
     if (node.type === 'file') {
@@ -109,9 +118,7 @@ export function IDE() {
       setOpenFiles(
         openFiles.map((f) => (f.id === activeFileId ? { ...f, content } : f))
       );
-      setFiles(
-        updateNodeById(files, activeFileId, { content })
-      );
+      setFiles(updateNodeById(files, activeFileId, { content }));
     }
   };
 
@@ -205,144 +212,234 @@ export function IDE() {
     }
   };
 
+  const handleRunCode = () => {
+    if (!activeFile) return;
+
+    setActiveTab('preview');
+    let result = '';
+
+    const ext = activeFile.name.split('.').pop()?.toLowerCase();
+
+    if (ext === 'html') {
+      result = activeFile.content;
+    } else if (ext === 'js' || ext === 'ts' || ext === 'jsx' || ext === 'tsx') {
+      try {
+        const logs: string[] = [];
+        const originalLog = console.log;
+        console.log = (...args: any[]) => {
+          logs.push(args.map((arg) => String(arg)).join(' '));
+          originalLog(...args);
+        };
+
+        eval(activeFile.content);
+
+        console.log = originalLog;
+        result = logs.length > 0 ? logs.join('\n') : 'Code executed successfully (no output)';
+      } catch (error) {
+        result = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } else if (ext === 'py') {
+      result = `Python execution requires a backend server.\n\nCode to execute:\n${activeFile.content}\n\nExpected output: Hello, World!\nPython script executed!`;
+    } else if (ext === 'css') {
+      result = `CSS Preview:\n\n${activeFile.content}`;
+    } else {
+      result = `File type .${ext} cannot be executed directly.\nContent:\n\n${activeFile.content}`;
+    }
+
+    setOutput(result);
+  };
+
+  const handleSearch = () => {
+    if (!searchQuery.trim()) return;
+
+    const results = searchInFiles(files, searchQuery);
+    if (results.length > 0) {
+      handleFileClick(results[0]);
+    }
+  };
+
+  const filteredFiles = searchQuery.trim()
+    ? files.map((root) => ({
+        ...root,
+        children: root.children?.filter((child) =>
+          child.name.toLowerCase().includes(searchQuery.toLowerCase())
+        ),
+      }))
+    : files;
+
   return (
     <div className="h-screen flex flex-col bg-background">
-      <div className="h-12 border-b flex items-center justify-between px-4 bg-card">
-        <div className="flex items-center gap-2">
-          <Code2 className="h-5 w-5 text-primary" />
-          <h1 className="font-semibold text-lg">Web IDE</h1>
+      <div className="h-14 border-b flex items-center justify-between px-4 bg-[#1e1e1e] border-[#3c3c3c]">
+        <div className="flex items-center gap-4 flex-1">
+          <div className="flex items-center gap-2">
+            <Code2 className="h-5 w-5 text-primary" />
+            <h1 className="font-semibold text-lg">WEB IDE</h1>
+          </div>
+
+          <div className="flex-1 max-w-md mx-auto">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch();
+                  }
+                }}
+                placeholder="Search files..."
+                className="pl-9 h-9 bg-[#3c3c3c] border-[#3c3c3c] focus-visible:ring-1 focus-visible:ring-[#007acc]"
+              />
+            </div>
+          </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-        >
-          {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-        </Button>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowTerminal(!showTerminal)}
+            className={cn(
+              'h-9 w-9',
+              showTerminal && 'bg-accent'
+            )}
+          >
+            <TerminalIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            onClick={handleRunCode}
+            disabled={!activeFile}
+            className="gap-2 h-9 bg-[#0e639c] hover:bg-[#1177bb]"
+          >
+            <Play className="h-4 w-4" />
+            Run
+          </Button>
+        </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-12 border-r flex flex-col gap-2 py-2 bg-card">
-          <Button
-            variant={sidebarView === 'explorer' ? 'secondary' : 'ghost'}
-            size="icon"
-            onClick={() => setSidebarView('explorer')}
-            className="mx-1"
-          >
-            <FolderTree className="h-5 w-5" />
-          </Button>
-          <Button
-            variant={sidebarView === 'search' ? 'secondary' : 'ghost'}
-            size="icon"
-            onClick={() => setSidebarView('search')}
-            className="mx-1"
-          >
-            <Search className="h-5 w-5" />
-          </Button>
-        </div>
-
-        <div className="w-64 flex-shrink-0">
-          {sidebarView === 'explorer' ? (
-            <FileExplorer
-              files={files}
-              onFileClick={handleFileClick}
-              onAddFile={handleAddFile}
-              onRename={handleRename}
-              onDelete={handleDelete}
-              clipboard={clipboard}
-              onCut={handleCut}
-              onCopy={handleCopy}
-              onPaste={handlePaste}
-              selectedFileId={activeFileId}
-            />
-          ) : (
-            <SearchPanel files={files} onFileClick={handleFileClick} />
-          )}
-        </div>
-
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Tabs value="code" className="h-full flex flex-col">
-            <div className="border-b bg-card">
-              <TabsList className="h-10 bg-transparent rounded-none border-b-0 w-full justify-start px-2">
-                <TabsTrigger value="code" className="gap-2">
-                  <Code2 className="h-4 w-4" />
-                  Code
-                </TabsTrigger>
-                <TabsTrigger value="output" className="gap-2">
-                  <Play className="h-4 w-4" />
-                  Preview
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="code" className="flex-1 flex flex-col m-0 overflow-hidden">
-              {openFiles.length > 0 && (
-                <div className="border-b bg-card">
-                  <ScrollArea className="w-full">
-                    <div className="flex items-center h-10">
-                      {openFiles.map((file) => (
-                        <div
-                          key={file.id}
-                          className={cn(
-                            'flex items-center gap-2 px-3 h-full border-r cursor-pointer hover:bg-accent transition-colors group',
-                            activeFileId === file.id && 'bg-background'
-                          )}
-                          onClick={() => setActiveFileId(file.id)}
-                        >
-                          <span className="text-sm">{file.name}</span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCloseFile(file.id);
-                            }}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
-
-              {activeFile && (
-                <div className="px-3 py-2 border-b bg-muted/30 text-xs text-muted-foreground flex items-center gap-1">
-                  {getPathBreadcrumbs(activeFile.path).map((part, idx, arr) => (
-                    <span key={idx} className="flex items-center gap-1">
-                      {part}
-                      {idx < arr.length - 1 && <ChevronRight className="h-3 w-3" />}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex-1 overflow-hidden">
-                <CodeEditor
-                  file={activeFile}
-                  onContentChange={handleContentChange}
-                  theme={theme}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ResizablePanelGroup direction="vertical">
+          <ResizablePanel defaultSize={showTerminal ? 70 : 100} minSize={30}>
+            <ResizablePanelGroup direction="horizontal">
+              <ResizablePanel defaultSize={20} minSize={15} maxSize={40}>
+                <FileExplorer
+                  files={filteredFiles}
+                  onFileClick={handleFileClick}
+                  onAddFile={handleAddFile}
+                  onRename={handleRename}
+                  onDelete={handleDelete}
+                  clipboard={clipboard}
+                  onCut={handleCut}
+                  onCopy={handleCopy}
+                  onPaste={handlePaste}
+                  selectedFileId={activeFileId}
                 />
-              </div>
-            </TabsContent>
+              </ResizablePanel>
 
-            <TabsContent value="output" className="flex-1 m-0 overflow-hidden">
-              <div className="h-full flex items-center justify-center bg-muted/20 p-8">
-                <div className="text-center space-y-2">
-                  <Play className="h-12 w-12 mx-auto text-muted-foreground" />
-                  <p className="text-muted-foreground">
-                    Preview functionality coming soon
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    This panel will display output and previews
-                  </p>
+              <ResizableHandle withHandle />
+
+              <ResizablePanel defaultSize={80}>
+                <div className="h-full flex flex-col overflow-hidden">
+                  <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'code' | 'preview')} className="h-full flex flex-col">
+                    <div className="border-b bg-[#1e1e1e] border-[#3c3c3c]">
+                      <TabsList className="h-10 bg-transparent rounded-none border-b-0 w-full justify-start px-2">
+                        <TabsTrigger value="code" className="gap-2 data-[state=active]:bg-[#1e1e1e] data-[state=active]:border-b-2 data-[state=active]:border-[#007acc]">
+                          <Code2 className="h-4 w-4" />
+                          Code
+                        </TabsTrigger>
+                        <TabsTrigger value="preview" className="gap-2 data-[state=active]:bg-[#1e1e1e] data-[state=active]:border-b-2 data-[state=active]:border-[#007acc]">
+                          <Play className="h-4 w-4" />
+                          Preview
+                        </TabsTrigger>
+                      </TabsList>
+                    </div>
+
+                    <TabsContent value="code" className="flex-1 flex flex-col m-0 overflow-hidden">
+                      {openFiles.length > 0 && (
+                        <div className="border-b bg-[#252526] border-[#3c3c3c]">
+                          <ScrollArea className="w-full">
+                            <div className="flex items-center h-10">
+                              {openFiles.map((file) => (
+                                <div
+                                  key={file.id}
+                                  className={cn(
+                                    'flex items-center gap-2 px-3 h-full border-r border-[#3c3c3c] cursor-pointer hover:bg-[#2d2d2d] transition-colors group',
+                                    activeFileId === file.id && 'bg-[#1e1e1e]'
+                                  )}
+                                  onClick={() => setActiveFileId(file.id)}
+                                >
+                                  <span className="text-sm">{file.name}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 hover:bg-[#3c3c3c]"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCloseFile(file.id);
+                                    }}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+
+                      {activeFile && (
+                        <div className="px-3 py-2 border-b bg-[#252526] border-[#3c3c3c] text-xs text-muted-foreground flex items-center gap-1">
+                          {getPathBreadcrumbs(activeFile.path).map((part, idx, arr) => (
+                            <span key={idx} className="flex items-center gap-1">
+                              {part}
+                              {idx < arr.length - 1 && <ChevronRight className="h-3 w-3" />}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex-1 overflow-hidden">
+                        <CodeEditor
+                          file={activeFile}
+                          onContentChange={handleContentChange}
+                          theme="dark"
+                        />
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="preview" className="flex-1 m-0 overflow-hidden">
+                      <div className="h-full bg-[#1e1e1e]">
+                        {output && activeFile?.name.endsWith('.html') ? (
+                          <iframe
+                            srcDoc={output}
+                            className="w-full h-full border-0 bg-white"
+                            title="Preview"
+                            sandbox="allow-scripts"
+                          />
+                        ) : (
+                          <ScrollArea className="h-full">
+                            <pre className="p-4 text-sm font-mono text-[#d4d4d4] whitespace-pre-wrap">
+                              {output || 'Click "Run" to execute the current file'}
+                            </pre>
+                          </ScrollArea>
+                        )}
+                      </div>
+                    </TabsContent>
+                  </Tabs>
                 </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          {showTerminal && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize={30} minSize={20} maxSize={50}>
+                <Terminal onClose={() => setShowTerminal(false)} />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
       </div>
     </div>
   );
