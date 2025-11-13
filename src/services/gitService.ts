@@ -51,7 +51,7 @@ class GitService {
 
     console.log(`%c[Git Service] Adding file to Git: ${filePath}`, 'color: #0dbc79; font-weight: bold');
 
-    await terminalService.executeCommand(`git add ${filePath}`);
+    terminalService.addFileFromUI(filePath);
 
     this.notifyListeners(filePath, 'add');
   }
@@ -61,7 +61,7 @@ class GitService {
 
     console.log(`%c[Git Service] Removing file from Git: ${filePath}`, 'color: #cd3131; font-weight: bold');
 
-    await terminalService.executeCommand(`git rm ${filePath}`);
+    terminalService.removeFileFromUI(filePath);
 
     this.notifyListeners(filePath, 'rm');
   }
@@ -70,6 +70,8 @@ class GitService {
     await this.ensureGitInit();
 
     console.log(`%c[Git Service] File modified (tracked): ${filePath}`, 'color: #e5e510; font-weight: bold');
+
+    terminalService.modifyFileFromUI(filePath);
 
     this.notifyListeners(filePath, 'modify');
   }

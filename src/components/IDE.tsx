@@ -92,11 +92,37 @@ export function IDE() {
 
       if (event === 'git-init') {
         gitService.setInitialized(true);
-        console.log('[IDE] Git initialized from terminal');
+        console.log('%c[IDE → UI] Git initialized from terminal', 'color: #11a8cd; font-weight: bold');
       } else if (event === 'git-add') {
-        console.log(`[IDE] File staged from terminal: ${data.file}`);
+        console.log(`%c[IDE → UI] File staged from terminal: ${data.file}`, 'color: #11a8cd; font-weight: bold');
       } else if (event === 'file-touch') {
-        console.log(`[IDE] File created from terminal: ${data.file}`);
+        console.log(`%c[IDE → UI] File created from terminal: ${data.file}`, 'color: #11a8cd; font-weight: bold');
+
+        const parent = files[0];
+        const parentPath = parent?.path || 'project';
+        const newNode: FileNode = {
+          id: generateId(),
+          name: data.file,
+          type: 'file',
+          path: `${parentPath} > ${data.file}`,
+          content: '',
+          parentId: undefined,
+        };
+        setFiles(addNodeToParent(files, null, newNode));
+      } else if (event === 'file-mkdir') {
+        console.log(`%c[IDE → UI] Folder created from terminal: ${data.folder}`, 'color: #11a8cd; font-weight: bold');
+
+        const parent = files[0];
+        const parentPath = parent?.path || 'project';
+        const newNode: FileNode = {
+          id: generateId(),
+          name: data.folder,
+          type: 'folder',
+          path: `${parentPath} > ${data.folder}`,
+          children: [],
+          parentId: undefined,
+        };
+        setFiles(addNodeToParent(files, null, newNode));
       }
     };
 
@@ -134,12 +160,19 @@ export function IDE() {
     }
   };
 
-  const handleContentChange = (content: string) => {
+  const handleContentChange = async (content: string) => {
     if (activeFileId) {
+      const activeFile = openFiles.find((f) => f.id === activeFileId);
+
       setOpenFiles(
         openFiles.map((f) => (f.id === activeFileId ? { ...f, content } : f))
       );
       setFiles(updateNodeById(files, activeFileId, { content }));
+
+      if (activeFile) {
+        console.log(`%c[UI → Git] File content changed: ${activeFile.name}`, 'color: #f5f543; font-weight: bold');
+        await gitService.modifyFile(activeFile.name);
+      }
     }
   };
 
@@ -161,8 +194,10 @@ export function IDE() {
     setFiles(addNodeToParent(files, parentId, newNode));
 
     if (!isFolder) {
-      console.log(`%c[IDE] File created in UI: ${newName}`, 'color: #3b8eea; font-weight: bold');
+      console.log(`%c[UI → Git] File created in UI: ${newName}`, 'color: #3b8eea; font-weight: bold');
       await gitService.addFile(newName);
+    } else {
+      console.log(`%c[UI → Git] Folder created in UI: ${newName}`, 'color: #3b8eea; font-weight: bold');
     }
   };
 
@@ -195,9 +230,13 @@ export function IDE() {
 
   const handleDelete = async (id: string) => {
     const node = findNodeById(files, id);
-    if (node && node.type === 'file') {
-      console.log(`%c[IDE] File deleted in UI: ${node.name}`, 'color: #3b8eea; font-weight: bold');
-      await gitService.removeFile(node.name);
+    if (node) {
+      if (node.type === 'file') {
+        console.log(`%c[UI → Git] File deleted in UI: ${node.name}`, 'color: #f14c4c; font-weight: bold');
+        await gitService.removeFile(node.name);
+      } else {
+        console.log(`%c[UI → Git] Folder deleted in UI: ${node.name}`, 'color: #f14c4c; font-weight: bold');
+      }
     }
 
     setFiles(removeNodeById(files, id));
