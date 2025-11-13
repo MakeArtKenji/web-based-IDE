@@ -1,106 +1,161 @@
-import { useState, useRef, useEffect } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Input } from '@/components/ui/input';
+import { useRef, useEffect } from 'react';
 import { Terminal as TerminalIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Terminal as XTerm } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { terminalService } from '@/services/terminalService';
+import '@xterm/xterm/css/xterm.css';
 
 interface TerminalProps {
   onClose: () => void;
 }
 
-interface CommandOutput {
-  command: string;
-  output: string;
-  timestamp: number;
-}
-
 export function Terminal({ onClose }: TerminalProps) {
-  const [command, setCommand] = useState('');
-  const [history, setHistory] = useState<CommandOutput[]>([]);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const currentLineRef = useRef<string>('');
+  const cursorPositionRef = useRef<number>(0);
+  const commandHistoryRef = useRef<string[]>([]);
+  const historyIndexRef = useRef<number>(-1);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [history]);
+    if (!terminalRef.current) return;
 
-  const executeCommand = async (cmd: string) => {
-    const trimmedCmd = cmd.trim();
-    if (!trimmedCmd) return;
-
-    setCommandHistory((prev) => [...prev, trimmedCmd]);
-    setHistoryIndex(-1);
-
-    let output = '';
-
-    if (trimmedCmd === 'clear') {
-      setHistory([]);
-      return;
-    }
-
-    if (trimmedCmd === 'help') {
-      output = `Available commands:
-  help       - Show this help message
-  clear      - Clear terminal
-  echo <msg> - Echo a message
-  ls         - List files (simulated)
-  pwd        - Print working directory
-  date       - Show current date/time
-
-Note: This is a simulated terminal. Real command execution would require a backend.`;
-    } else if (trimmedCmd.startsWith('echo ')) {
-      output = trimmedCmd.substring(5);
-    } else if (trimmedCmd === 'ls') {
-      output = 'project/\n  index.html\n  styles.css\n  app.ts';
-    } else if (trimmedCmd === 'pwd') {
-      output = '/project';
-    } else if (trimmedCmd === 'date') {
-      output = new Date().toString();
-    } else {
-      output = `Command not found: ${trimmedCmd}\nType 'help' for available commands.`;
-    }
-
-    setHistory((prev) => [
-      ...prev,
-      {
-        command: trimmedCmd,
-        output,
-        timestamp: Date.now(),
+    const term = new XTerm({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        black: '#000000',
+        red: '#cd3131',
+        green: '#0dbc79',
+        yellow: '#e5e510',
+        blue: '#2472c8',
+        magenta: '#bc3fbc',
+        cyan: '#11a8cd',
+        white: '#e5e5e5',
+        brightBlack: '#666666',
+        brightRed: '#f14c4c',
+        brightGreen: '#23d18b',
+        brightYellow: '#f5f543',
+        brightBlue: '#3b8eea',
+        brightMagenta: '#d670d6',
+        brightCyan: '#29b8db',
+        brightWhite: '#e5e5e5',
       },
-    ]);
-  };
+      rows: 20,
+    });
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      executeCommand(command);
-      setCommand('');
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (commandHistory.length > 0) {
-        const newIndex = historyIndex === -1
-          ? commandHistory.length - 1
-          : Math.max(0, historyIndex - 1);
-        setHistoryIndex(newIndex);
-        setCommand(commandHistory[newIndex]);
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+
+    term.open(terminalRef.current);
+    fitAddon.fit();
+
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    const prompt = () => {
+      term.write('\r\n\x1b[32m$\x1b[0m ');
+    };
+
+    term.writeln('\x1b[1;36mWeb-Based IDE Terminal\x1b[0m');
+    term.writeln('Type "help" for available commands, "git init" to start using Git.\r\n');
+    prompt();
+
+    const executeCommand = async (command: string) => {
+      const output = await terminalService.executeCommand(command);
+
+      if (command.trim() === 'clear') {
+        term.clear();
+      } else if (output) {
+        term.write('\r\n' + output);
       }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyIndex !== -1) {
-        const newIndex = historyIndex + 1;
-        if (newIndex >= commandHistory.length) {
-          setHistoryIndex(-1);
-          setCommand('');
-        } else {
-          setHistoryIndex(newIndex);
-          setCommand(commandHistory[newIndex]);
+
+      if (command.trim() !== '') {
+        commandHistoryRef.current.push(command);
+        historyIndexRef.current = commandHistoryRef.current.length;
+      }
+
+      prompt();
+    };
+
+    term.onData((data) => {
+      const code = data.charCodeAt(0);
+
+      if (code === 13) {
+        const command = currentLineRef.current;
+        currentLineRef.current = '';
+        cursorPositionRef.current = 0;
+        term.write('\r\n');
+        executeCommand(command);
+      } else if (code === 127) {
+        if (cursorPositionRef.current > 0) {
+          currentLineRef.current =
+            currentLineRef.current.slice(0, cursorPositionRef.current - 1) +
+            currentLineRef.current.slice(cursorPositionRef.current);
+          cursorPositionRef.current--;
+          term.write('\b \b');
         }
+      } else if (code === 27) {
+        if (data === '\x1b[A') {
+          if (historyIndexRef.current > 0) {
+            historyIndexRef.current--;
+            const historyCommand = commandHistoryRef.current[historyIndexRef.current];
+
+            term.write('\r\x1b[K\x1b[32m$\x1b[0m ' + historyCommand);
+            currentLineRef.current = historyCommand;
+            cursorPositionRef.current = historyCommand.length;
+          }
+        } else if (data === '\x1b[B') {
+          if (historyIndexRef.current < commandHistoryRef.current.length - 1) {
+            historyIndexRef.current++;
+            const historyCommand = commandHistoryRef.current[historyIndexRef.current];
+
+            term.write('\r\x1b[K\x1b[32m$\x1b[0m ' + historyCommand);
+            currentLineRef.current = historyCommand;
+            cursorPositionRef.current = historyCommand.length;
+          } else if (historyIndexRef.current === commandHistoryRef.current.length - 1) {
+            historyIndexRef.current = commandHistoryRef.current.length;
+            term.write('\r\x1b[K\x1b[32m$\x1b[0m ');
+            currentLineRef.current = '';
+            cursorPositionRef.current = 0;
+          }
+        }
+      } else if (code >= 32 && code < 127) {
+        currentLineRef.current =
+          currentLineRef.current.slice(0, cursorPositionRef.current) +
+          data +
+          currentLineRef.current.slice(cursorPositionRef.current);
+        cursorPositionRef.current++;
+        term.write(data);
       }
+    });
+
+    const handleResize = () => {
+      fitAddon.fit();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+    });
+
+    if (terminalRef.current) {
+      resizeObserver.observe(terminalRef.current);
     }
-  };
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+      term.dispose();
+    };
+  }, []);
 
   return (
     <div className="h-full flex flex-col bg-[#1e1e1e] text-[#d4d4d4]">
@@ -119,45 +174,7 @@ Note: This is a simulated terminal. Real command execution would require a backe
         </Button>
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div ref={scrollRef} className="p-3 space-y-2 font-mono text-sm">
-            {history.length === 0 && (
-              <div className="text-[#858585]">
-                Welcome to the terminal. Type 'help' for available commands.
-              </div>
-            )}
-            {history.map((item, idx) => (
-              <div key={idx} className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[#4ec9b0]">$</span>
-                  <span className="text-[#d4d4d4]">{item.command}</span>
-                </div>
-                {item.output && (
-                  <div className="pl-4 text-[#cccccc] whitespace-pre-wrap">
-                    {item.output}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
-
-      <div className="border-t border-[#3c3c3c] px-3 py-2">
-        <div className="flex items-center gap-2 font-mono text-sm">
-          <span className="text-[#4ec9b0]">$</span>
-          <Input
-            ref={inputRef}
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a command..."
-            className="flex-1 bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[#d4d4d4] placeholder:text-[#858585] h-7 px-0"
-            autoFocus
-          />
-        </div>
-      </div>
+      <div ref={terminalRef} className="flex-1 p-2" />
     </div>
   );
 }
