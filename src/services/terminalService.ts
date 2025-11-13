@@ -1,4 +1,4 @@
-interface GitRepository {
+export interface GitRepository {
   branch: string;
   commits: GitCommit[];
   staged: Set<string>;
@@ -7,7 +7,7 @@ interface GitRepository {
   initialized: boolean;
 }
 
-interface GitCommit {
+export interface GitCommit {
   hash: string;
   message: string;
   author: string;
@@ -15,15 +15,37 @@ interface GitCommit {
   files: string[];
 }
 
+export type TerminalEventType = 'git-add' | 'git-rm' | 'git-init' | 'file-touch';
+
+export interface TerminalEventListener {
+  (event: TerminalEventType, data: any): void;
+}
+
 class TerminalService {
   private currentDir: string = '~/project';
   private repos: Map<string, GitRepository> = new Map();
   private fileSystem: Map<string, string> = new Map();
+  private listeners: TerminalEventListener[] = [];
 
   constructor() {
     this.initializeFileSystem();
     console.log('%c[Terminal Service] Initialized', 'color: #0dbc79; font-weight: bold');
     console.log('%cGit commands available: init, status, add, commit, log, branch, clone', 'color: #11a8cd');
+  }
+
+  subscribe(listener: TerminalEventListener) {
+    this.listeners.push(listener);
+    console.log('[Terminal Service] Listener subscribed');
+  }
+
+  unsubscribe(listener: TerminalEventListener) {
+    this.listeners = this.listeners.filter(l => l !== listener);
+    console.log('[Terminal Service] Listener unsubscribed');
+  }
+
+  private notifyListeners(event: TerminalEventType, data: any) {
+    console.log(`[Terminal Service] Event: ${event}`, data);
+    this.listeners.forEach(listener => listener(event, data));
   }
 
   private initializeFileSystem() {
@@ -132,6 +154,7 @@ class TerminalService {
     });
 
     console.log(`[Git] Initialized repository at ${this.currentDir}`);
+    this.notifyListeners('git-init', { path: this.currentDir });
     return `Initialized empty Git repository in ${this.currentDir}/.git/`;
   }
 
@@ -201,6 +224,7 @@ class TerminalService {
     });
 
     console.log(`[Git] Staged files:`, files);
+    files.forEach(file => this.notifyListeners('git-add', { file }));
     return '';
   }
 
@@ -327,6 +351,7 @@ class TerminalService {
     }
 
     console.log(`[Terminal] Created file: ${filename}`);
+    this.notifyListeners('file-touch', { file: filename });
     return '';
   }
 
@@ -386,6 +411,14 @@ Available commands:
 
   getCurrentDirectory(): string {
     return this.currentDir;
+  }
+
+  getRepository(): GitRepository | null {
+    return this.getRepo();
+  }
+
+  hasGitRepo(): boolean {
+    return this.repos.has(this.currentDir);
   }
 }
 

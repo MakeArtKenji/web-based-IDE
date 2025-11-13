@@ -31,6 +31,8 @@ import {
 } from '@/utils/fileUtils';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { gitService } from '@/services/gitService';
+import { terminalService } from '@/services/terminalService';
 
 export function IDE() {
   const [files, setFiles] = useState<FileNode[]>([
@@ -84,6 +86,25 @@ export function IDE() {
 
   useEffect(() => {
     document.documentElement.classList.add('dark');
+
+    const handleTerminalEvent = (event: any, data: any) => {
+      console.log(`%c[IDE] Terminal event received: ${event}`, 'color: #bc3fbc; font-weight: bold', data);
+
+      if (event === 'git-init') {
+        gitService.setInitialized(true);
+        console.log('[IDE] Git initialized from terminal');
+      } else if (event === 'git-add') {
+        console.log(`[IDE] File staged from terminal: ${data.file}`);
+      } else if (event === 'file-touch') {
+        console.log(`[IDE] File created from terminal: ${data.file}`);
+      }
+    };
+
+    terminalService.subscribe(handleTerminalEvent);
+
+    return () => {
+      terminalService.unsubscribe(handleTerminalEvent);
+    };
   }, []);
 
   const handleFileClick = (node: FileNode) => {
@@ -122,7 +143,7 @@ export function IDE() {
     }
   };
 
-  const handleAddFile = (parentId: string | null, isFolder: boolean) => {
+  const handleAddFile = async (parentId: string | null, isFolder: boolean) => {
     const newName = isFolder ? 'new-folder' : 'new-file.txt';
     const parent = parentId ? findNodeById(files, parentId) : null;
     const parentPath = parent ? parent.path : files[0]?.path || 'project';
@@ -138,6 +159,11 @@ export function IDE() {
     };
 
     setFiles(addNodeToParent(files, parentId, newNode));
+
+    if (!isFolder) {
+      console.log(`%c[IDE] File created in UI: ${newName}`, 'color: #3b8eea; font-weight: bold');
+      await gitService.addFile(newName);
+    }
   };
 
   const handleRename = (id: string, newName: string) => {
@@ -167,7 +193,13 @@ export function IDE() {
     }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    const node = findNodeById(files, id);
+    if (node && node.type === 'file') {
+      console.log(`%c[IDE] File deleted in UI: ${node.name}`, 'color: #3b8eea; font-weight: bold');
+      await gitService.removeFile(node.name);
+    }
+
     setFiles(removeNodeById(files, id));
     setOpenFiles(openFiles.filter((f) => f.id !== id));
     if (activeFileId === id) {
