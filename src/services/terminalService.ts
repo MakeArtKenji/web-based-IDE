@@ -15,7 +15,7 @@ export interface GitCommit {
   files: string[];
 }
 
-export type TerminalEventType = 'git-add' | 'git-rm' | 'git-init' | 'file-touch';
+export type TerminalEventType = 'git-add' | 'git-rm' | 'git-init' | 'file-touch' | 'file-mkdir' | 'file-rm' | 'file-modify' | 'path-change';
 
 export interface TerminalEventListener {
   (event: TerminalEventType, data: any): void;
@@ -327,6 +327,7 @@ class TerminalService {
     } else {
       this.currentDir = path.startsWith('/') ? path : `${this.currentDir}/${path}`;
     }
+    this.notifyListeners('path-change', { path: this.currentDir });
     return '';
   }
 
@@ -334,7 +335,8 @@ class TerminalService {
     if (!dirname) {
       return 'mkdir: missing operand';
     }
-    console.log(`[Terminal] Created directory: ${dirname}`);
+    console.log('%c[Terminal] Created directory: ' + dirname, 'color: #0dbc79; font-weight: bold');
+    this.notifyListeners('file-mkdir', { folder: dirname });
     return '';
   }
 
@@ -350,7 +352,7 @@ class TerminalService {
       repo.untracked.add(filename);
     }
 
-    console.log(`[Terminal] Created file: ${filename}`);
+    console.log('%c[Terminal] Created file: ' + filename, 'color: #0dbc79; font-weight: bold');
     this.notifyListeners('file-touch', { file: filename });
     return '';
   }
@@ -419,6 +421,62 @@ Available commands:
 
   hasGitRepo(): boolean {
     return this.repos.has(this.currentDir);
+  }
+
+  addFileFromUI(filename: string): void {
+    const repo = this.getRepo();
+    if (repo) {
+      console.log('%c[Terminal] UI file added to Git: ' + filename, 'color: #23d18b; font-weight: bold');
+      if (repo.untracked.has(filename)) {
+        repo.untracked.delete(filename);
+      }
+      repo.staged.add(filename);
+    }
+  }
+
+  removeFileFromUI(filename: string): void {
+    const repo = this.getRepo();
+    if (repo) {
+      console.log('%c[Terminal] UI file removed from Git: ' + filename, 'color: #f14c4c; font-weight: bold');
+      repo.untracked.delete(filename);
+      repo.staged.delete(filename);
+      repo.modified.delete(filename);
+    }
+
+    const fullPath = `${this.currentDir}/${filename}`;
+    this.fileSystem.delete(fullPath);
+  }
+
+  modifyFileFromUI(filename: string): void {
+    const repo = this.getRepo();
+    if (repo) {
+      console.log('%c[Terminal] UI file modified: ' + filename, 'color: #f5f543; font-weight: bold');
+      if (!repo.staged.has(filename) && !repo.untracked.has(filename)) {
+        repo.modified.add(filename);
+      }
+    }
+  }
+
+  getUsername(): string {
+    return 'user';
+  }
+
+  getHostname(): string {
+    return 'IDE';
+  }
+
+  formatPrompt(): string {
+    const username = this.getUsername();
+    const hostname = this.getHostname();
+    const repo = this.getRepo();
+    const branch = repo ? repo.branch : '';
+    const path = this.currentDir.replace('~/', '/');
+
+    if (repo) {
+      return `\x1b[32m${username}@${hostname}\x1b[0m \x1b[35mMINGW64\x1b[0m \x1b[33m${path}\x1b[0m \x1b[36m(${branch})\x1b[0m\n$ `;
+    } else {
+      return `\x1b[32m${username}@${hostname}\x1b[0m \x1b[35mMINGW64\x1b[0m \x1b[33m${path}\x1b[0m\n$ `;
+    }
   }
 }
 

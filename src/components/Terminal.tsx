@@ -60,11 +60,12 @@ export function Terminal({ onClose }: TerminalProps) {
     fitAddonRef.current = fitAddon;
 
     const prompt = () => {
-      term.write('\r\n\x1b[32m$\x1b[0m ');
+      const promptText = terminalService.formatPrompt();
+      term.write(promptText);
     };
 
     term.writeln('\x1b[1;36mWeb-Based IDE Terminal\x1b[0m');
-    term.writeln('Type "help" for available commands, "git init" to start using Git.\r\n');
+    term.writeln('Type "help" for available commands, "git init" to start using Git.');
     prompt();
 
     const executeCommand = async (command: string) => {
